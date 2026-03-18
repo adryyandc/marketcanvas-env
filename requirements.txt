@@ -1,0 +1,16 @@
+# MarketCanvas-Env dependencies
+# ==============================
+# Core (required)
+numpy>=1.24.0
+
+# Visual rendering (strongly recommended)
+Pillow>=10.0.0
+
+# RL environment interface (optional — environment works without it)
+gymnasium>=0.29.0
+
+# MCP server (required to run mcp_server.py)
+mcp>=1.0.0
+
+# LLM demo (required to run demo_llm.py)
+groq>=0.9.0
