@@ -2,7 +2,7 @@
 Heuristic reward function for MarketCanvas-Env.
 
 The reward is a scalar in [-1.0, 1.0] computed at the end of an episode.
-It aggregates five independent sub-scores:
+It aggregates six independent sub-scores:
 
   1. element_presence   (0.0 – 0.35)  Required roles present on canvas
   2. wcag_contrast      (0.0 – 0.25)  Text/background contrast passes WCAG AA
@@ -221,15 +221,20 @@ class RewardFunction:
     def _score_wcag(
         self, canvas: Canvas, elements: list[CanvasElement], spec: TargetSpec
     ) -> float:
-        """Average WCAG-pass fraction across text-bearing elements."""
+        """Average WCAG-pass fraction across text-bearing elements.
+
+        Contrast is checked against the element's own fill colour, since
+        text is rendered on top of its own box — not against whatever
+        element sits beneath it in z-order.
+        """
         text_elements = [e for e in elements if e.type == "text" or e.role in ("headline", "subheadline", "body", "cta")]
         if not text_elements:
             return 0.0
 
         passes = 0
         for el in text_elements:
-            # Find the topmost element directly beneath this one (by z-index)
-            bg_color = self._background_color_under(el, elements, canvas)
+            # Use the element's own fill as the immediate background for text
+            bg_color = el.color
             large = el.font_size >= 18 or el.role == "headline"
             if passes_wcag_aa(el.text_color, bg_color, large_text=large):
                 passes += 1
@@ -292,31 +297,3 @@ class RewardFunction:
         non_empty = sum(1 for e in important if e.content.strip())
         return self.W_CONTENT * (non_empty / len(important))
 
-    # ------------------------------------------------------------------ #
-    # Helpers
-    # ------------------------------------------------------------------ #
-
-    def _background_color_under(
-        self,
-        el: CanvasElement,
-        elements: list[CanvasElement],
-        canvas: Canvas,
-    ) -> str:
-        """
-        Return the effective background hex colour under *el*.
-
-        Strategy: find the element with the highest z-index that is strictly
-        below *el* and spatially overlaps it.  If none, fall back to the
-        element's own background colour (text on transparent = its own box).
-        """
-        candidates = [
-            e for e in elements
-            if e.id != el.id
-            and e.z_index < el.z_index
-            and el.intersection_area(e) > 0
-        ]
-        if candidates:
-            beneath = max(candidates, key=lambda e: e.z_index)
-            return beneath.color
-        # No element below — assume white canvas background
-        return "#FFFFFF"
