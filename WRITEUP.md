@@ -34,7 +34,8 @@ The observation dict structure is:
       "id": "bg", "type": "shape", "role": "background",
       "x": 0, "y": 0, "width": 800, "height": 600,
       "z_index": 0, "color": "#1A237E", "text_color": "#FFFFFF",
-      "content": "", "within_bounds": true, "overlaps_with": []
+      "content": "", "font_size": 16, "opacity": 1.0,
+      "within_bounds": true, "overlaps_with": []
     },
     ...
   ]
@@ -137,11 +138,17 @@ The raw score `[-0.30, 1.00]` is linearly mapped to `[-1.0, 1.0]`.
    *Mitigation:* make `content_quality` a hard gate on `element_presence`.
 
 5. **Contrasting border vs. fill.**  The WCAG check compares `text_color`
-   against the background *beneath* the element, not the element's own fill.
-   An agent could exploit this by placing text elements atop a high-contrast
-   background while using an otherwise illegible fill.
-   *Mitigation:* use the element's own fill as the immediate background for
-   text elements.
+   against the element's own fill colour, since text is rendered on its own
+   box.  (An earlier version compared against the element *beneath* in
+   z-order, which was exploitable by placing text atop a high-contrast
+   background while using an illegible fill.)
+
+6. **Role relabelling.**  The `change_role` action lets the agent relabel
+   any existing element (e.g., turn a generic shape into a "headline") to
+   satisfy `element_presence` without creating a proper element.
+   *Mitigation:* gate `element_presence` on minimum-size or content
+   requirements per role, or restrict `change_role` to a curated set of
+   valid transitions.
 
 ---
 
