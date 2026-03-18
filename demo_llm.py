@@ -5,14 +5,14 @@ Connects the Groq free API (Llama 3.3 70B) to the MarketCanvas environment
 using the same tool interface exposed by the MCP server.  The LLM autonomously
 interprets a design prompt and calls tools to build the banner, step by step.
 
-Requirements
-------------
-    pip install groq
+Image placeholders are filled with AI-generated images via the Hugging Face
+Inference API (FLUX.1-schnell model — free tier, no card required).
 
 Setup
 -----
-    export GROQ_API_KEY=<your-free-api-key>
-    # Free key at https://console.groq.com  (14 400 req/day, no card needed)
+    # .env file (or real environment variables):
+    GROQ_API_KEY=<key>            # free at https://console.groq.com
+    HUGGINGFACE_API_KEY=<token>   # free at https://huggingface.co/settings/tokens
 
 Usage
 -----
@@ -196,6 +196,12 @@ Canvas rules:
 - Available element types: "text", "shape", "image".
 - Available roles: "background", "headline", "subheadline", "body", "cta", "image_placeholder", "divider", "generic".
 
+Image elements (type="image", role="image_placeholder"):
+- Set the "content" field to a vivid, descriptive English phrase of what the image should show.
+  Example: content="majestic lion roaring on a rocky cliff at golden hour"
+- This description is sent to an AI image generator, so be specific and visual.
+- Do NOT use generic words like "image" or "photo" — describe the actual subject.
+
 Suggested workflow:
 1. Call list_actions to confirm available operations.
 2. Add all required elements using execute_action(action_type="add_element", ...).
@@ -295,6 +301,84 @@ def _summarise_tool_result(name: str, args: dict, result: dict | list) -> str:
     if name == "list_actions":
         return f"{len(result)} action types"
     return str(result)[:80]
+
+
+# ---------------------------------------------------------------------------
+# AI image compositing via Hugging Face Inference API (huggingface_hub SDK)
+# ---------------------------------------------------------------------------
+
+# Ordered list of free-tier text-to-image models to try.
+_HF_MODELS = [
+    "stabilityai/stable-diffusion-xl-base-1.0",
+    "runwayml/stable-diffusion-v1-5",
+]
+
+
+def _composite_generated_images(env: MarketCanvasEnv, png_path: str) -> None:
+    """Replace every image_placeholder on the saved PNG with an AI-generated image.
+
+    Uses huggingface_hub.InferenceClient which handles endpoint routing and
+    model warm-up automatically.  Tries each model in _HF_MODELS until one
+    succeeds.
+
+    Reads HUGGINGFACE_API_KEY (or HF_TOKEN) from the environment.
+    Free token: https://huggingface.co/settings/tokens  (no card required)
+    """
+    try:
+        from huggingface_hub import InferenceClient
+        from PIL import Image as PILImage
+    except ImportError as exc:
+        print(f"  [SKIP] Missing dependency ({exc}) — skipping image generation.")
+        print("         Install with: pip install huggingface_hub Pillow")
+        return
+
+    hf_token = os.environ.get("HUGGINGFACE_API_KEY") or os.environ.get("HF_TOKEN")
+    if not hf_token:
+        print(
+            "  [SKIP] HUGGINGFACE_API_KEY not set — skipping image generation.\n"
+            "         Get a free token at https://huggingface.co/settings/tokens"
+        )
+        return
+
+    state = env.get_semantic_state()
+    image_elements = [
+        el for el in state["elements"]
+        if el.get("type") == "image" or el.get("role") == "image_placeholder"
+    ]
+    if not image_elements:
+        return
+
+    client = InferenceClient(token=hf_token)
+    banner = PILImage.open(png_path).convert("RGBA")
+
+    for el in image_elements:
+        description = (el.get("content") or "").strip()
+        if not description or description.lower() in ("image", "photo", ""):
+            description = "abstract colorful artwork"
+
+        w = max(1, int(el["width"]))
+        h = max(1, int(el["height"]))
+        x = int(el["x"])
+        y = int(el["y"])
+
+        print(f"  [IMG] Generating: \"{description[:60]}\" ({w}×{h})…")
+        generated = None
+        for model in _HF_MODELS:
+            try:
+                img = client.text_to_image(description, model=model)
+                generated = img.convert("RGBA").resize((w, h), PILImage.LANCZOS)
+                print(f"       → {model.split('/')[1]}  composited at ({x},{y})")
+                break
+            except Exception as exc:
+                print(f"       {model.split('/')[1]} failed: {exc}")
+
+        if generated:
+            banner.paste(generated, (x, y))
+        else:
+            print("  [WARN] All models failed — placeholder kept.")
+
+    banner.convert("RGB").save(png_path, format="PNG")
+    print(f"  [IMG] Final banner saved to: {png_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -401,6 +485,7 @@ def main(args: argparse.Namespace) -> None:
         try:
             saved = env.save_png(output)
             print(f"  Rendered canvas saved to: {saved}")
+            _composite_generated_images(env, saved)
         except ImportError:
             print("  [SKIP] PNG rendering requires Pillow: pip install Pillow")
         except Exception as exc:

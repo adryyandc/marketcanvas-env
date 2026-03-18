@@ -14,3 +14,4 @@ mcp>=1.0.0
 
 # LLM demo (required to run demo_llm.py)
 groq>=0.9.0
+huggingface_hub>=0.20.0
